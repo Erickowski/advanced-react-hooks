@@ -1,38 +1,143 @@
-// useContext: simple Counter
-// http://localhost:3000/isolated/exercise/03.js
+// useContext: Caching response data in context
+// 💯 caching in a context provider (exercise)
+// http://localhost:3000/isolated/exercise/03.extra-2.js
+
+// you can edit this here and look at the isolated page or you can copy/paste
+// this in the regular exercise file.
 
 import * as React from 'react'
+import {
+  fetchPokemon,
+  PokemonForm,
+  PokemonDataView,
+  PokemonInfoFallback,
+  PokemonErrorBoundary,
+} from '../pokemon'
+import {useAsync} from '../utils'
 
-// 🐨 create your CountContext here with React.createContext
+const PokemonCacheContext = React.createContext()
 
-// 🐨 create a CountProvider component here that does this:
-//   🐨 get the count state and setCount updater with React.useState
-//   🐨 create a `value` array with count and setCount
-//   🐨 return your context provider with the value assigned to that array and forward all the other props
-//   💰 more specifically, we need the children prop forwarded to the context provider
-
-function CountDisplay() {
-  // 🐨 get the count from useContext with the CountContext
-  const count = 0
-  return <div>{`The current count is ${count}`}</div>
+function pokemonCacheReducer(state, action) {
+  switch (action.type) {
+    case 'ADD_POKEMON': {
+      return {...state, [action.pokemonName]: action.pokemonData}
+    }
+    default: {
+      throw new Error(`Unhandled action type: ${action.type}`)
+    }
+  }
 }
 
-function Counter() {
-  // 🐨 get the setCount from useContext with the CountContext
-  const setCount = () => {}
-  const increment = () => setCount(c => c + 1)
-  return <button onClick={increment}>Increment count</button>
+function PokemonCacheProvider(props) {
+  const [cache, dispatch] = React.useReducer(pokemonCacheReducer, {})
+  return <PokemonCacheContext.Provider value={[cache, dispatch]} {...props} />
+}
+
+function usePokemonCache() {
+  const context = React.useContext(PokemonCacheContext)
+  if (!context) {
+    throw new Error(
+      'usePokemonCache must be used within a PokemonCacheProvider',
+    )
+  }
+  return context
+}
+
+function PokemonInfo({pokemonName: externalPokemonName}) {
+  const [cache, dispatch] = usePokemonCache()
+
+  const pokemonName = externalPokemonName?.toLowerCase()
+  const {
+    data: pokemon,
+    status,
+    error,
+    run,
+    setData,
+  } = useAsync({
+    status: pokemonName ? 'pending' : 'idle',
+  })
+
+  React.useEffect(() => {
+    if (!pokemonName) {
+      return
+    } else if (cache[pokemonName]) {
+      setData(cache[pokemonName])
+    } else {
+      run(
+        fetchPokemon(pokemonName).then(pokemonData => {
+          dispatch({type: 'ADD_POKEMON', pokemonName, pokemonData})
+          return pokemonData
+        }),
+      )
+    }
+  }, [cache, dispatch, pokemonName, run, setData])
+
+  if (status === 'idle') {
+    return 'Submit a pokemon'
+  } else if (status === 'pending') {
+    return <PokemonInfoFallback name={pokemonName} />
+  } else if (status === 'rejected') {
+    throw error
+  } else if (status === 'resolved') {
+    return <PokemonDataView pokemon={pokemon} />
+  }
+}
+
+function PreviousPokemon({onSelect}) {
+  const [cache] = React.useContext(PokemonCacheContext)
+  return (
+    <div>
+      Previous Pokemon
+      <ul style={{listStyle: 'none', paddingLeft: 0}}>
+        {Object.keys(cache).map(pokemonName => (
+          <li key={pokemonName} style={{margin: '4px auto'}}>
+            <button
+              style={{width: '100%'}}
+              onClick={() => onSelect(pokemonName)}
+            >
+              {pokemonName}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function PokemonSection({onSelect, pokemonName}) {
+  return (
+    <PokemonCacheProvider>
+      <div style={{display: 'flex'}}>
+        <PreviousPokemon onSelect={onSelect} />
+        <div className="pokemon-info" style={{marginLeft: 10}}>
+          <PokemonErrorBoundary
+            onReset={() => onSelect('')}
+            resetKeys={[pokemonName]}
+          >
+            <PokemonInfo pokemonName={pokemonName} />
+          </PokemonErrorBoundary>
+        </div>
+      </div>
+    </PokemonCacheProvider>
+  )
 }
 
 function App() {
+  const [pokemonName, setPokemonName] = React.useState(null)
+
+  function handleSubmit(newPokemonName) {
+    setPokemonName(newPokemonName)
+  }
+
+  function handleSelect(newPokemonName) {
+    setPokemonName(newPokemonName)
+  }
+
   return (
-    <div>
-      {/*
-        🐨 wrap these two components in the CountProvider so they can access
-        the CountContext value
-      */}
-      <CountDisplay />
-      <Counter />
+    <div className="pokemon-info-app">
+      <PokemonForm pokemonName={pokemonName} onSubmit={handleSubmit} />
+      <hr />
+      <PokemonSection onSelect={handleSelect} pokemonName={pokemonName} />
     </div>
   )
 }
